@@ -20,6 +20,10 @@ const app = express();
 // CORS 설정
 const corsOptions = {
   origin: process.env.CORS_ORIGIN?.split(',') || '*',
+  /*
+  운영 단계
+  origin: ["https://lifeistravel.io", "https://api.lifeistravel.io"],
+  */
   credentials: process.env.CORS_CREDENTIALS === 'true',
   optionsSuccessStatus: 200,
 };
