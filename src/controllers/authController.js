@@ -311,7 +311,7 @@ export const register = async (req, res) => {
 
     // 10. 생성된 store 정보 조회 (created_at, updated_at 포함)
     const createdStores = await query(
-      `SELECT id, email, name, phone_number, business_number,
+      `SELECT id, email, phone_number, business_number,
               business_name, representative_name, address, detail_address,
               latitude, longitude, business_type, description,
               has_completed_setup, created_at, updated_at
@@ -334,8 +334,7 @@ export const register = async (req, res) => {
             id: createdStore.id,
             storeId: createdStore.id,
             email: createdStore.email,
-            name: createdStore.name,
-            storeName: createdStore.name,
+            businessName: createdStore.business_name,
             phoneNumber: createdStore.phone_number,
             businessType: createdStore.business_type,
             hasCompletedSetup: Boolean(createdStore.has_completed_setup), // MySQL int -> boolean
@@ -398,7 +397,7 @@ export const login = async (req, res) => {
     // 1. 사용자 조회
     const stores = await query(
       `SELECT
-        id, email, password_hash, name, phone_number,
+        id, email, password_hash, phone_number,
         business_number, business_name, representative_name,
         address, detail_address, latitude, longitude,
         business_type, description, has_completed_setup,
@@ -454,8 +453,7 @@ export const login = async (req, res) => {
             id: store.id,
             storeId: store.id, // Flutter가 기대하는 필드명
             email: store.email,
-            name: store.name,
-            storeName: store.name, // Flutter가 기대하는 필드명
+            businessName: store.business_name,
             phoneNumber: store.phone_number,
             businessType: store.business_type,
             hasCompletedSetup: Boolean(store.has_completed_setup), // MySQL int(0/1) -> boolean 변환
