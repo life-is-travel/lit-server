@@ -245,7 +245,21 @@ export const register = async (req, res) => {
       );
     }
 
-    // 3. 비밀번호 해싱
+    // 3. 사업자 등록번호 중복 확인
+    if (businessNumber) {
+      const existingBusinessNumber = await query(
+        'SELECT id FROM stores WHERE business_number = ? LIMIT 1',
+        [businessNumber]
+      );
+
+      if (existingBusinessNumber && existingBusinessNumber.length > 0) {
+        return res.status(400).json(
+          error('BUSINESS_NUMBER_ALREADY_EXISTS', '이미 등록된 사업자 등록번호입니다', { businessNumber })
+        );
+      }
+    }
+
+    // 4. 비밀번호 해싱
     const passwordHash = await hashPassword(password);
 
     // 4. 점포 ID 생성
