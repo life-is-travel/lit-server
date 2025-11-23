@@ -16,7 +16,7 @@ export const getDashboardSummary = async (req, res) => {
 
     // 1. 점포 정보 조회
     const stores = await query(
-      'SELECT name FROM stores WHERE id = ? LIMIT 1',
+      'SELECT business_name FROM stores WHERE id = ? LIMIT 1',
       [storeId]
     );
 
@@ -26,7 +26,7 @@ export const getDashboardSummary = async (req, res) => {
       );
     }
 
-    const storeName = stores[0].name;
+    const storeName = stores[0].business_name;
 
     // 2. 예약 통계 조회
     const reservationStats = await query(

@@ -145,7 +145,7 @@ export const getStoreInfo = async (req, res) => {
     // 점포 정보 조회
     const stores = await query(
       `SELECT
-        id, email, name, phone_number, business_number,
+        id, email, phone_number, business_number,
         business_name, representative_name, address, detail_address,
         latitude, longitude, business_type, description,
         has_completed_setup, created_at, updated_at
@@ -168,7 +168,7 @@ export const getStoreInfo = async (req, res) => {
         {
           id: store.id,
           email: store.email,
-          name: store.name,
+          businessName: store.business_name,
           phoneNumber: store.phone_number,
           businessNumber: store.business_number,
           businessName: store.business_name,
@@ -270,7 +270,7 @@ export const updateStoreInfo = async (req, res) => {
     // 업데이트된 정보 조회
     const stores = await query(
       `SELECT
-        id, email, name, phone_number, business_number,
+        id, email, phone_number, business_number,
         business_name, representative_name, address, detail_address,
         latitude, longitude, business_type, description,
         has_completed_setup, created_at, updated_at
@@ -287,10 +287,9 @@ export const updateStoreInfo = async (req, res) => {
         {
           id: store.id,
           email: store.email,
-          name: store.name,
+          businessName: store.business_name,
           phoneNumber: store.phone_number,
           businessNumber: store.business_number,
-          businessName: store.business_name,
           representativeName: store.representative_name,
           address: store.address,
           detailAddress: store.detail_address,
