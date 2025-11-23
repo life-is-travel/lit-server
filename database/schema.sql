@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS stores (
   id VARCHAR(255) PRIMARY KEY COMMENT '점포 고유 ID',
   email VARCHAR(255) UNIQUE NOT NULL COMMENT '이메일 (로그인 ID)',
   password_hash VARCHAR(255) NOT NULL COMMENT '암호화된 비밀번호',
-  name VARCHAR(255) NOT NULL COMMENT '점포명',
   phone_number VARCHAR(20) COMMENT '전화번호',
   business_type ENUM('RESTAURANT', 'CAFE', 'HOTEL', 'OTHER') COMMENT '업종',
   profile_image_url TEXT COMMENT '프로필 이미지 URL',
@@ -21,7 +20,7 @@ CREATE TABLE IF NOT EXISTS stores (
 
   -- 사업자 정보
   business_number VARCHAR(50) UNIQUE COMMENT '사업자 등록번호',
-  business_name VARCHAR(255) COMMENT '사업자명',
+  business_name VARCHAR(255) NOT NULL COMMENT '사업자명',
   representative_name VARCHAR(255) COMMENT '대표자명',
 
   -- 위치 정보

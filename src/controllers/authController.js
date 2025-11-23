@@ -164,7 +164,6 @@ export const register = async (req, res) => {
     const {
       email,
       password,
-      name,
       phoneNumber,
       businessNumber,
       businessName,
@@ -208,9 +207,9 @@ export const register = async (req, res) => {
       );
     }
 
-    if (!name || !name.trim()) {
+    if (!businessName || !businessName.trim()) {
       return res.status(400).json(
-        error('VALIDATION_ERROR', '점포명이 필요합니다', { field: 'name' })
+        error('VALIDATION_ERROR', '사업자명이 필요합니다', { field: 'businessName' })
       );
     }
 
@@ -255,20 +254,19 @@ export const register = async (req, res) => {
     // 5. 점포 정보 저장
     await query(
       `INSERT INTO stores (
-        id, email, password_hash, name, phone_number,
+        id, email, password_hash, phone_number,
         business_number, business_name, representative_name,
         address, detail_address, latitude, longitude,
         business_type, description, has_completed_setup,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         storeId,
         email,
         passwordHash,
-        name,
         phoneNumber || null,
         businessNumber || null,
-        businessName || null,
+        businessName,
         representativeName || null,
         address || null,
         detailAddress || null,
