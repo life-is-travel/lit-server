@@ -123,18 +123,18 @@ export async function handlePaymentStatusChanged(connection, payment, data) {
       ]
     );
 
-    // 연결된 예약이 있으면 예약 상태도 업데이트
+    // 연결된 예약이 있으면 예약 상태도 업데이트 (가게 승인 대기)
     if (payment.reservation_id) {
       await connection.query(
         `UPDATE reservations
-         SET status = 'confirmed',
+         SET status = 'pending_approval',
              payment_status = 'paid',
              updated_at = NOW()
          WHERE id = ?`,
         [payment.reservation_id]
       );
 
-      console.log(`✅ 예약 확정 완료: ${payment.reservation_id}`);
+      console.log(`✅ 결제 완료, 가게 승인 대기: ${payment.reservation_id}`);
     }
 
     console.log(`✅ 결제 성공 처리 완료: ${payment.pg_order_id}`);

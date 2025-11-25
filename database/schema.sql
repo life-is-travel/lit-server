@@ -214,7 +214,7 @@ CREATE TABLE IF NOT EXISTS reservations (
   storage_id VARCHAR(255) COMMENT '보관함 ID',
   storage_number VARCHAR(50) COMMENT '보관함 번호',
 
-  status ENUM('pending', 'confirmed', 'rejected', 'in_progress', 'completed', 'cancelled') DEFAULT 'pending' COMMENT '예약 상태',
+  status ENUM('pending', 'pending_approval', 'confirmed', 'rejected', 'in_progress', 'completed', 'cancelled') DEFAULT 'pending' COMMENT '예약 상태',
 
   -- 시간 정보
   start_time TIMESTAMP NOT NULL COMMENT '시작 시간',

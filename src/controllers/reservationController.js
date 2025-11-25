@@ -4,8 +4,9 @@
  */
 
 import { success, error } from '../utils/response.js';
-import { query } from '../config/database.js';
+import { query, pool } from '../config/database.js';
 import { v4 as uuidv4 } from 'uuid';
+import axios from 'axios';
 
 /**
  * 예약 생성
@@ -358,7 +359,8 @@ export const approveReservation = async (req, res) => {
       );
     }
 
-    if (reservations[0].status !== 'pending') {
+    // pending 또는 pending_approval 상태만 승인 가능
+    if (reservations[0].status !== 'pending' && reservations[0].status !== 'pending_approval') {
       return res.status(400).json(
         error('INVALID_STATUS', '승인 가능한 상태가 아닙니다', {
           currentStatus: reservations[0].status,
@@ -426,81 +428,27 @@ export const approveReservation = async (req, res) => {
 };
 
 /**
- * 예약 거부
+ * 예약 거부 (자동 환불 포함)
  * PUT /api/reservations/:id/reject
  */
 export const rejectReservation = async (req, res) => {
+  const connection = await pool.getConnection();
+  
   try {
     const storeId = req.storeId;
     const { id } = req.params;
     const { reason } = req.body;
 
-    // 예약 존재 및 상태 확인
-    const reservations = await query(
-      'SELECT status FROM reservations WHERE id = ? AND store_id = ? LIMIT 1',
+    await connection.beginTransaction();
+
+    // 1. 예약 정보 조회 (FOR UPDATE로 락 걸기)
+    const [reservations] = await connection.query(
+      'SELECT * FROM reservations WHERE id = ? AND store_id = ? FOR UPDATE',
       [id, storeId]
     );
 
     if (!reservations || reservations.length === 0) {
-      return res.status(404).json(
-        error('RESERVATION_NOT_FOUND', '예약을 찾을 수 없습니다')
-      );
-    }
-
-    if (reservations[0].status !== 'pending') {
-      return res.status(400).json(
-        error('INVALID_STATUS', '거부 가능한 상태가 아닙니다', {
-          currentStatus: reservations[0].status,
-        })
-      );
-    }
-
-    // 예약 상태를 rejected로 변경
-    await query(
-      `UPDATE reservations
-       SET status = 'rejected', message = ?, updated_at = NOW()
-       WHERE id = ? AND store_id = ?`,
-      [reason || '점포 사정으로 예약이 거부되었습니다', id, storeId]
-    );
-
-    // 업데이트된 예약 조회
-    const updatedReservations = await query(
-      `SELECT
-        id, store_id as storeId, customer_name as customerName,
-        status, message, updated_at as updatedAt
-      FROM reservations
-      WHERE id = ?
-      LIMIT 1`,
-      [id]
-    );
-
-    return res.json(success(updatedReservations[0], '예약 거부 성공'));
-  } catch (err) {
-    console.error('예약 거부 중 에러:', err);
-    return res.status(500).json(
-      error('INTERNAL_ERROR', '서버 오류가 발생했습니다', {
-        message: err.message,
-      })
-    );
-  }
-};
-
-/**
- * 예약 취소
- * PUT /api/reservations/:id/cancel
- */
-export const cancelReservation = async (req, res) => {
-  try {
-    const storeId = req.storeId;
-    const { id } = req.params;
-
-    // 예약 존재 및 상태 확인
-    const reservations = await query(
-      'SELECT status, storage_id FROM reservations WHERE id = ? AND store_id = ? LIMIT 1',
-      [id, storeId]
-    );
-
-    if (!reservations || reservations.length === 0) {
+      await connection.rollback();
       return res.status(404).json(
         error('RESERVATION_NOT_FOUND', '예약을 찾을 수 없습니다')
       );
@@ -508,51 +456,278 @@ export const cancelReservation = async (req, res) => {
 
     const reservation = reservations[0];
 
-    if (reservation.status === 'cancelled') {
+    // 2. 이미 처리된 예약인지 확인
+    if (reservation.status !== 'pending' && reservation.status !== 'pending_approval') {
+      await connection.rollback();
       return res.status(400).json(
-        error('ALREADY_CANCELLED', '이미 취소된 예약입니다')
+        error('INVALID_STATUS', '거부할 수 없는 예약 상태입니다', {
+          currentStatus: reservation.status,
+        })
       );
     }
 
-    if (reservation.status === 'completed') {
-      return res.status(400).json(
-        error('CANNOT_CANCEL_COMPLETED', '완료된 예약은 취소할 수 없습니다')
-      );
-    }
-
-    // 보관함이 할당된 경우 상태를 available로 변경
-    if (reservation.storage_id) {
-      await query(
-        'UPDATE storages SET status = \'available\', updated_at = NOW() WHERE id = ? AND store_id = ?',
-        [reservation.storage_id, storeId]
-      );
-    }
-
-    // 예약 상태를 cancelled로 변경
-    await query(
-      'UPDATE reservations SET status = \'cancelled\', updated_at = NOW() WHERE id = ? AND store_id = ?',
-      [id, storeId]
+    // 3. 결제 정보 조회
+    const [payments] = await connection.query(
+      'SELECT * FROM payments WHERE reservation_id = ? AND status = "SUCCESS"',
+      [id]
     );
 
-    // 업데이트된 예약 조회
-    const updatedReservations = await query(
+    let refundResult = null;
+    const payment = payments && payments.length > 0 ? payments[0] : null;
+
+    // 4. 결제가 완료된 경우 자동 환불
+    if (payment) {
+      const secretKey = process.env.TOSS_SECRET_KEY;
+      const encodedKey = Buffer.from(secretKey + ':').toString('base64');
+
+      try {
+        // 토스페이먼츠 환불 API 호출
+        const tossResponse = await axios.post(
+          `https://api.tosspayments.com/v1/payments/${payment.pg_payment_key}/cancel`,
+          {
+            cancelReason: reason || '가게 사정으로 예약 거부',
+          },
+          {
+            headers: {
+              Authorization: `Basic ${encodedKey}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+
+        refundResult = tossResponse.data;
+
+        // 결제 상태 업데이트
+        await connection.query(
+          `UPDATE payments
+           SET status = 'CANCELED',
+               canceled_at = NOW(),
+               updated_at = NOW()
+           WHERE id = ?`,
+          [payment.id]
+        );
+
+        console.log(`✅ 자동 환불 완료: ${payment.pg_payment_key}`);
+
+      } catch (refundError) {
+        console.error('환불 실패:', refundError);
+        await connection.rollback();
+        
+        return res.status(500).json(
+          error('REFUND_FAILED', '환불 처리 중 오류가 발생했습니다', {
+            detail: refundError.response?.data || refundError.message,
+          })
+        );
+      }
+    }
+
+    // 5. 예약 상태 업데이트
+    await connection.query(
+      `UPDATE reservations
+       SET status = 'rejected',
+           payment_status = ?,
+           message = ?,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [
+        payment ? 'refunded' : reservation.payment_status,
+        reason || '점포 사정으로 예약이 거부되었습니다',
+        id,
+      ]
+    );
+
+    await connection.commit();
+
+    // 6. 업데이트된 예약 조회
+    const [updatedReservations] = await connection.query(
       `SELECT
         id, store_id as storeId, customer_name as customerName,
-        status, updated_at as updatedAt
+        status, payment_status as paymentStatus, message, updated_at as updatedAt
       FROM reservations
       WHERE id = ?
       LIMIT 1`,
       [id]
     );
 
-    return res.json(success(updatedReservations[0], '예약 취소 성공'));
+    return res.json(
+      success({
+        reservation: updatedReservations[0],
+        refunded: !!payment,
+        refund_amount: payment?.amount_total,
+        refund_data: refundResult,
+      }, '예약 거부 및 환불 처리 완료')
+    );
+
   } catch (err) {
-    console.error('예약 취소 중 에러:', err);
+    await connection.rollback();
+    console.error('예약 거부 중 에러:', err);
+    
     return res.status(500).json(
       error('INTERNAL_ERROR', '서버 오류가 발생했습니다', {
         message: err.message,
       })
     );
+  } finally {
+    connection.release();
+  }
+};
+
+/**
+ * 예약 취소 (자동 환불 포함)
+ * PUT /api/reservations/:id/cancel
+ * 가게에서 자동 승인된 예약을 취소할 때 사용
+ */
+export const cancelReservation = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const storeId = req.storeId;
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    await connection.beginTransaction();
+
+    // 1. 예약 정보 조회 (FOR UPDATE로 락 걸기)
+    const [reservations] = await connection.query(
+      'SELECT * FROM reservations WHERE id = ? AND store_id = ? FOR UPDATE',
+      [id, storeId]
+    );
+
+    if (!reservations || reservations.length === 0) {
+      await connection.rollback();
+      return res.status(404).json(
+        error('RESERVATION_NOT_FOUND', '예약을 찾을 수 없습니다')
+      );
+    }
+
+    const reservation = reservations[0];
+
+    // 2. 상태 검증
+    if (reservation.status === 'cancelled') {
+      await connection.rollback();
+      return res.status(400).json(
+        error('ALREADY_CANCELLED', '이미 취소된 예약입니다')
+      );
+    }
+
+    if (reservation.status === 'completed') {
+      await connection.rollback();
+      return res.status(400).json(
+        error('CANNOT_CANCEL_COMPLETED', '완료된 예약은 취소할 수 없습니다')
+      );
+    }
+
+    // 3. 결제 정보 조회
+    const [payments] = await connection.query(
+      'SELECT * FROM payments WHERE reservation_id = ? AND status = "SUCCESS"',
+      [id]
+    );
+
+    let refundResult = null;
+    const payment = payments && payments.length > 0 ? payments[0] : null;
+
+    // 4. 결제가 완료된 경우 자동 환불
+    if (payment) {
+      const secretKey = process.env.TOSS_SECRET_KEY;
+      const encodedKey = Buffer.from(secretKey + ':').toString('base64');
+
+      try {
+        // 토스페이먼츠 환불 API 호출
+        const tossResponse = await axios.post(
+          `https://api.tosspayments.com/v1/payments/${payment.pg_payment_key}/cancel`,
+          {
+            cancelReason: reason || '가게 사정으로 예약 취소',
+          },
+          {
+            headers: {
+              Authorization: `Basic ${encodedKey}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+
+        refundResult = tossResponse.data;
+
+        // 결제 상태 업데이트
+        await connection.query(
+          `UPDATE payments
+           SET status = 'CANCELED',
+               canceled_at = NOW(),
+               updated_at = NOW()
+           WHERE id = ?`,
+          [payment.id]
+        );
+
+        console.log(`✅ 자동 환불 완료: ${payment.pg_payment_key}`);
+
+      } catch (refundError) {
+        console.error('환불 실패:', refundError);
+        await connection.rollback();
+        
+        return res.status(500).json(
+          error('REFUND_FAILED', '환불 처리 중 오류가 발생했습니다', {
+            detail: refundError.response?.data || refundError.message,
+          })
+        );
+      }
+    }
+
+    // 5. 보관함이 할당된 경우 상태를 available로 변경
+    if (reservation.storage_id) {
+      await connection.query(
+        'UPDATE storages SET status = \'available\', updated_at = NOW() WHERE id = ? AND store_id = ?',
+        [reservation.storage_id, storeId]
+      );
+    }
+
+    // 6. 예약 상태 업데이트
+    await connection.query(
+      `UPDATE reservations
+       SET status = 'cancelled',
+           payment_status = ?,
+           message = ?,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [
+        payment ? 'refunded' : reservation.payment_status,
+        reason || '가게 사정으로 예약 취소',
+        id,
+      ]
+    );
+
+    await connection.commit();
+
+    // 7. 업데이트된 예약 조회
+    const [updatedReservations] = await connection.query(
+      `SELECT
+        id, store_id as storeId, customer_name as customerName,
+        status, payment_status as paymentStatus, message, updated_at as updatedAt
+      FROM reservations
+      WHERE id = ?
+      LIMIT 1`,
+      [id]
+    );
+
+    return res.json(
+      success({
+        reservation: updatedReservations[0],
+        refunded: !!payment,
+        refund_amount: payment?.amount_total,
+        refund_data: refundResult,
+      }, '예약 취소 및 환불 처리 완료')
+    );
+
+  } catch (err) {
+    await connection.rollback();
+    console.error('예약 취소 중 에러:', err);
+    
+    return res.status(500).json(
+      error('INTERNAL_ERROR', '서버 오류가 발생했습니다', {
+        message: err.message,
+      })
+    );
+  } finally {
+    connection.release();
   }
 };
 
