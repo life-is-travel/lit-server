@@ -5,8 +5,13 @@
 
 import { success, error } from '../utils/response.js';
 import { query } from '../config/database.js';
-import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
+import {
+  validateReservation,
+  generateOrderId,
+  createPayment,
+  updateReservationPaymentStatus,
+} from '../services/paymentService.js';
 
 /**
  * 결제 준비
@@ -14,7 +19,15 @@ import axios from 'axios';
  */
 export const preparePayment = async (req, res) => {
   try {
-    const { store_id, user_id, amount, order_name, customer_email, customer_name } = req.body;
+    const {
+      store_id,
+      user_id,
+      amount,
+      order_name,
+      customer_email,
+      customer_name,
+      reservation_id,
+    } = req.body;
 
     // 필수 필드 검증
     if (!store_id || !user_id || !amount || !order_name) {
@@ -32,36 +45,33 @@ export const preparePayment = async (req, res) => {
       );
     }
 
+    // 예약 ID가 있으면 예약 정보 검증
+    if (reservation_id) {
+      try {
+        await validateReservation(reservation_id, user_id);
+      } catch (validationError) {
+        return res.status(400).json(
+          error('RESERVATION_VALIDATION_FAILED', validationError.message)
+        );
+      }
+    }
+
     // 고유한 주문번호(orderId) 생성
-    const timestamp = Date.now();
-    const randomStr = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const orderId = `ORDER_${timestamp}_${randomStr}`;
+    const orderId = generateOrderId();
 
     // payments 테이블에 PENDING 상태로 사전 저장
-    await query(
-      `INSERT INTO payments (
-        store_id,
-        user_id,
-        amount_total,
-        currency,
-        pg_provider,
-        pg_order_id,
-        pg_method,
-        status,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [
-        store_id,
-        user_id,
-        amount,
-        'KRW',
-        'toss',
-        orderId,
-        'UNKNOWN', // 결제 수단은 아직 미정
-        'PENDING',
-      ]
-    );
+    await createPayment({
+      storeId: store_id,
+      userId: user_id,
+      reservationId: reservation_id,
+      amount,
+      orderId,
+    });
+
+    // 예약 상태를 'payment_pending'으로 업데이트
+    if (reservation_id) {
+      await updateReservationPaymentStatus(reservation_id, 'pending');
+    }
 
     // 클라이언트에 필요한 정보 반환
     return res.status(200).json(
@@ -74,6 +84,7 @@ export const preparePayment = async (req, res) => {
         client_key: process.env.TOSS_CLIENT_KEY, // 클라이언트 키
         customer_email: customer_email,
         customer_name: customer_name,
+        reservation_id: reservation_id,
       })
     );
   } catch (err) {
@@ -405,37 +416,5 @@ export const cancelPayment = async (req, res) => {
         detail: err.message,
       })
     );
-  }
-};
-
-/**
- * 토스페이먼츠 웹훅 처리
- * POST /api/payments/webhook
- */
-export const handleWebhook = async (req, res) => {
-  try {
-    const { eventType, data } = req.body;
-
-    console.log('웹훅 수신:', eventType, data);
-
-    // 결제 상태 변경 이벤트 처리
-    if (eventType === 'PAYMENT_STATUS_CHANGED') {
-      const { orderId, status } = data;
-
-      // DB 업데이트
-      await query(
-        `UPDATE payments 
-         SET status = ?, updated_at = NOW()
-         WHERE pg_order_id = ?`,
-        [status, orderId]
-      );
-    }
-
-    // 웹훅 응답은 항상 200 OK 반환
-    return res.status(200).json({ success: true });
-  } catch (err) {
-    console.error('웹훅 처리 실패:', err);
-    // 웹훅은 실패해도 200 반환 (재시도 방지)
-    return res.status(200).json({ success: false });
   }
 };

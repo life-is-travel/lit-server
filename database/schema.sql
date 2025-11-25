@@ -319,6 +319,7 @@ CREATE TABLE IF NOT EXISTS payments (
   -- 어떤 가게 / 어떤 유저 매출인지
   store_id VARCHAR(255) NOT NULL COMMENT '점포 ID',
   user_id VARCHAR(255) NOT NULL COMMENT '사용자 ID',
+  reservation_id VARCHAR(255) NULL COMMENT '예약 ID (예약 결제인 경우)',
 
   -- 금액 관련
   amount_total INT UNSIGNED NOT NULL COMMENT '고객이 결제한 총 금액(원)',
@@ -326,9 +327,9 @@ CREATE TABLE IF NOT EXISTS payments (
 
   -- PG 관련 정보
   pg_provider VARCHAR(50) NOT NULL COMMENT 'PG사 (toss)',
-  pg_payment_key VARCHAR(100) NOT NULL COMMENT '토스 paymentKey',
+  pg_payment_key VARCHAR(100) NULL COMMENT '토스 paymentKey',
   pg_order_id VARCHAR(100) NOT NULL COMMENT '주문 ID',
-  pg_method VARCHAR(30) NOT NULL COMMENT '결제 방법 (CARD, KAKAOPAY 등)',
+  pg_method VARCHAR(30) NOT NULL DEFAULT 'UNKNOWN' COMMENT '결제 방법 (CARD, KAKAOPAY 등)',
 
   -- 상태
   status ENUM('PENDING', 'SUCCESS', 'FAILED', 'CANCELED', 'REFUNDED')
@@ -344,8 +345,11 @@ CREATE TABLE IF NOT EXISTS payments (
   is_settled TINYINT(1) NOT NULL DEFAULT 0 COMMENT '정산에 포함되었는지 여부',
 
   FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE,
+  FOREIGN KEY (reservation_id) REFERENCES reservations(id) ON DELETE SET NULL,
   UNIQUE INDEX idx_payments_pg_payment_key (pg_payment_key),
-  INDEX idx_payments_store_paid (store_id, paid_at)
+  UNIQUE INDEX idx_payments_pg_order_id (pg_order_id),
+  INDEX idx_payments_store_paid (store_id, paid_at),
+  INDEX idx_payments_reservation (reservation_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='결제 정보';
 
 -- ============================================================================
@@ -432,6 +436,25 @@ CREATE TABLE IF NOT EXISTS email_verifications (
   INDEX idx_code (code),
   INDEX idx_expires_at (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='이메일 인증';
+
+-- ============================================================================
+-- 13. payment_webhooks - 결제 웹훅 이력 (멱등성 체크 및 정산 기준)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS payment_webhooks (
+  id VARCHAR(100) PRIMARY KEY COMMENT '웹훅 ID',
+  payment_id BIGINT UNSIGNED NOT NULL COMMENT '결제 ID',
+  pg_order_id VARCHAR(100) NOT NULL COMMENT 'PG 주문 ID',
+  pg_payment_key VARCHAR(100) NULL COMMENT 'PG 결제 키',
+  event_type VARCHAR(50) NOT NULL COMMENT '이벤트 타입',
+  status VARCHAR(30) NULL COMMENT '결제 상태',
+  webhook_data JSON NULL COMMENT '웹훅 원본 데이터',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '수신일시',
+
+  FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE,
+  INDEX idx_payment_id (payment_id),
+  INDEX idx_pg_order_id (pg_order_id),
+  INDEX idx_event_status (event_type, status, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='결제 웹훅 이력';
 
 -- ============================================================================
 -- 초기 데이터 삽입 (선택사항)

@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // 데이터베이스 연결 풀 생성
-const pool = mysql.createPool({
+export const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT) || 3306,
   user: process.env.DB_USER || 'root',

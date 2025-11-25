@@ -10,7 +10,6 @@ import {
   getPayment,
   getPayments,
   cancelPayment,
-  handleWebhook,
 } from '../controllers/paymentController.js';
 import { authenticate } from '../middleware/auth.js';
 
@@ -48,12 +47,5 @@ router.get('/', authenticate, getPayments);
  * POST /api/payments/:paymentKey/cancel
  */
 router.post('/:paymentKey/cancel', authenticate, cancelPayment);
-
-/**
- * 토스페이먼츠 웹훅
- * POST /api/payments/webhook
- * 결제 상태 변경 시 토스페이먼츠에서 호출
- */
-router.post('/webhook', handleWebhook);
 
 export default router;
