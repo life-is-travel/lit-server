@@ -83,6 +83,7 @@ import statisticsRoutes from './routes/statisticsRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import reviewRoutes from './routes/reviewRoutes.js';
 import checkinRoutes from './routes/checkin.js';
+import paymentRoutes from './routes/paymentRoutes.js';
 
 // 인증 라우트
 app.use('/api/auth', authRoutes);
@@ -110,6 +111,9 @@ app.use('/api/notifications', notificationRoutes);
 
 // 리뷰 라우트
 app.use('/api/reviews', reviewRoutes);
+
+// 결제 라우트
+app.use('/api/payments', paymentRoutes);
 
 // ============================================================================
 // 404 에러 핸들러
