@@ -511,8 +511,13 @@ CREATE TABLE IF NOT EXISTS settlement_items (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='정산 상세(결제별)';
 
 -- ============================================================================
--- 초기 데이터 삽입 (선택사항)
+-- 테이블 변경 사항
 -- ============================================================================
+
+ALTER TABLE payments
+  ADD COLUMN settlement_statement_id BIGINT UNSIGNED NULL COMMENT '포함된 정산 ID',
+  ADD INDEX idx_settle (is_settled, store_id, paid_at),
+  ADD FOREIGN KEY (settlement_statement_id) REFERENCES settlement_statements(id) ON DELETE SET NULL;
 
 -- 완료 메시지
 SELECT '✅ 데이터베이스 스키마 생성 완료!' AS message;
