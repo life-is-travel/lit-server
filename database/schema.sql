@@ -493,14 +493,18 @@ CREATE TABLE IF NOT EXISTS settlement_logs (
   period_start DATETIME NOT NULL COMMENT '정산 대상 기간 시작',
   period_end   DATETIME NOT NULL COMMENT '정산 대상 기간 종료',
 
-  status ENUM('success', 'partial', 'failed', 'noop') NOT NULL COMMENT '실행 결과 상태',
+  status ENUM('noop', 'success', 'partial', 'failed') NOT NULL COMMENT '실행 결과 상태',
   message TEXT NULL COMMENT '요약 메시지',
   error_message TEXT NULL COMMENT '에러 메시지(실패 시)',
 
   total_payments INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '정산 대상 결제 수',
   total_statements INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '생성된 정산 명세 수',
 
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  INDEX idx_period (period_start, period_end),
+  INDEX idx_status (status),
+  INDEX idx_started_at (started_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='정산 배치 실행 로그';
 
 -- ============================================================================
@@ -510,13 +514,24 @@ CREATE TABLE IF NOT EXISTS settlement_logs (
 
 CREATE TABLE IF NOT EXISTS settlement_errors (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '에러 ID',
+  
+  settlement_log_id BIGINT UNSIGNED NULL COMMENT '정산 배치 로그 ID',
+  
   type VARCHAR(50) NOT NULL COMMENT '에러 타입 코드',
   payment_id BIGINT UNSIGNED NULL COMMENT '관련 결제 ID',
   store_id VARCHAR(255) NULL COMMENT '관련 점포 ID',
   statement_id BIGINT UNSIGNED NULL COMMENT '관련 정산 명세 ID',
   message TEXT NULL COMMENT '에러 메시지',
   raw_data JSON NULL COMMENT '관련 데이터 스냅샷',
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '에러 발생 시각'
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '에러 발생 시각',
+  
+  FOREIGN KEY (settlement_log_id) REFERENCES settlement_logs(id) ON DELETE SET NULL,
+  INDEX idx_log_id (settlement_log_id),
+  INDEX idx_type (type),
+  INDEX idx_payment_id (payment_id),
+  INDEX idx_store_id (store_id),
+  INDEX idx_statement_id (statement_id),
+  INDEX idx_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='정산 관련 에러 로그';
 
 -- ============================================================================

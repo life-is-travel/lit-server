@@ -182,6 +182,7 @@ export async function runSettlementPeriod({ periodStart, periodEnd, dryRun = fal
         statementId = statementResult.insertId;
       } catch (e) {
         await logSettlementError(connection, {
+          settlementLogId: logId,
           type: 'STATEMENT_INSERT_FAIL',
           storeId,
           message: e.message,
@@ -192,6 +193,7 @@ export async function runSettlementPeriod({ periodStart, periodEnd, dryRun = fal
 
       if (!statementId) {
         await logSettlementError(connection, {
+          settlementLogId: logId,
           type: 'STATEMENT_INSERT_NO_ID',
           storeId,
           message: 'statementId가 없습니다.',
@@ -215,20 +217,22 @@ export async function runSettlementPeriod({ periodStart, periodEnd, dryRun = fal
           [statementId, p.id]
         );
 
-        if (updateResult.affectedRows !== 1) {
-          // 이 상황은 이론상 발생하면 안 됨 (FOR UPDATE + is_settled=0 조건)
+        if (updateResult.affectedRows === 0) {
+          // 이미 정산됨 (동시성 충돌 가능성)
           skippedPaymentCount++;
+          console.warn(`[스킵] paymentId=${p.id} 이미 정산됨 (동시 실행 감지)`);
+          
           await logSettlementError(connection, {
-            type: 'PAYMENT_UPDATE_MISMATCH',
+            settlementLogId: logId,
+            type: 'PAYMENT_ALREADY_SETTLED',
             paymentId: p.id,
             storeId,
             statementId,
-            message: 'payments UPDATE affectedRows != 1',
+            message: 'payments UPDATE affectedRows = 0 (이미 정산됨)',
             rawData: p,
           });
-          throw new Error(
-            `payments UPDATE 실패 또는 예상치 못한 상태 (paymentId=${p.id})`
-          );
+          
+          continue; // 해당 payment만 스킵, 나머지 계속 처리
         }
 
         successPaymentCount++;
@@ -243,6 +247,7 @@ export async function runSettlementPeriod({ periodStart, periodEnd, dryRun = fal
           );
         } catch (e) {
           await logSettlementError(connection, {
+            settlementLogId: logId,
             type: 'ITEM_INSERT_FAIL',
             paymentId: p.id,
             storeId,
@@ -372,15 +377,31 @@ function simulateSettlement(payments) {
  */
 async function logSettlementError(
   connection,
-  { type, paymentId = null, storeId = null, statementId = null, message = '', rawData = null }
+  { 
+    settlementLogId = null,
+    type, 
+    paymentId = null, 
+    storeId = null, 
+    statementId = null, 
+    message = '', 
+    rawData = null 
+  }
 ) {
   try {
     await connection.query(
       `INSERT INTO settlement_errors (
-          type, payment_id, store_id, statement_id,
+          settlement_log_id, type, payment_id, store_id, statement_id,
           message, raw_data, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-      [type, paymentId, storeId, statementId, message, rawData ? JSON.stringify(rawData) : null]
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        settlementLogId,
+        type, 
+        paymentId, 
+        storeId, 
+        statementId, 
+        message, 
+        rawData ? JSON.stringify(rawData) : null
+      ]
     );
   } catch (e) {
     console.error('settlement_errors INSERT 실패:', e);
